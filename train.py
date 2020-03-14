@@ -185,7 +185,7 @@ def main():
     # 実験キー(実験を一意に特定するためのキー)の取得
     exp_key = experiment.get_key()
     print('KEY: ' + exp_key)
-    ce_weights = 1.0
+    ce_weights = 0.5
     print('ce_weights: {}'.format(ce_weights))
     # HyperParamの記録
     hyper_params = {
