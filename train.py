@@ -17,8 +17,8 @@ from model import Autoencoder
 import matplotlib.pyplot as plt
 
 ## (for Mac) OMP: Error #15: Initializing libiomp5.dylib, but found libiomp5.dylib already initialized.
-# import os
-# os.environ['KMP_DUPLICATE_LIB_OK']='True'
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 def imshow(epoch, imgs, dec):
     fig, ax = plt.subplots(nrows=2, ncols=12, sharex=True, sharey=True, figsize=(18,6))
