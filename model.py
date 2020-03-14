@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
@@ -17,11 +18,8 @@ class Autoencoder(nn.Module):
         self.conv3 = nn.Sequential(nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=0),
                               nn.BatchNorm2d(128),
                               nn.ReLU())
-        # self.fc1 = nn.Conv2d(128, 10, kernel_size=3)
 
         # decoder
-        # self.fc2 = nn.Sequential(nn.ConvTranspose2d(10, 128, kernel_size=3),
-        #                    nn.ReLU())
         self.conv3d = nn.Sequential(
                               nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=0),
                               nn.BatchNorm2d(64), nn.ReLU())
@@ -32,21 +30,51 @@ class Autoencoder(nn.Module):
                               nn.ConvTranspose2d(32, 3, kernel_size=5, stride=2),
                               nn.BatchNorm2d(3))
 
-
-    def forward(self, x):
+    def encode(self, x):
         x = self.conv1(x)
         # print(f'conv1: {x.size()}')
         x = self.conv2(x)
         # print(f'conv2: {x.size()}')
-        encoded = self.conv3(x)
+        x = self.conv3(x)
         # print(f'conv3: {encoded.size()}')
+        return x
 
-        decoded = self.conv3d(encoded)
+    def decode(self, x):
+        x = self.conv3d(x)
         # print(f'conv3d: {decoded.size()}')
-        decoded = self.conv2d(decoded)[:, :, 1:-1, 1:-1]
+        x = self.conv2d(x)[:, :, 1:-1, 1:-1]
         # print(f'conv2d: {decoded.size()}')
-        decoded = self.conv1d(decoded)[:, :, :-1, :-1]
+        x = self.conv1d(x)[:, :, :-1, :-1]
         # print(f'conv1d: {decoded.size()}')
-        decoded = nn.Sigmoid()(decoded)
-        return encoded, decoded
+        x = nn.Sigmoid()(x)
+        return x
+
+    def forward(self, x):
+        encoded = self.encode(x)
+        decoded = self.decode(encoded)
+        return decoded
+
+
+class Classifier(nn.Module):
+    def __init__(self):
+        super(Classifier, self).__init__()
+
+        self.autoencoder = Autoencoder()
+        self.fc1 = nn.Conv2d(128, 10, kernel_size=3)
+
+    def forward(self, x):
+        encoded = self.autoencoder.encode(x)
+        print(f'encoded: {encoded.size()}')
+        cx = self.fc1(encoded)
+        print(f'fc1: {cx.size()}')
+        cx = cx.view(cx.size(0), -1)
+        print(f'view: {cx.size()}')
+        cx = F.softmax(cx, dim=1)
+        cx = cx.clamp(min=1e-8)
+        print(f'softmax: {cx}')
+
+        # decoded = self.decode(encoded)
+        decoded = None
+
+        return cx, decoded
 
