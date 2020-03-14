@@ -11,7 +11,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms, utils
 from torch.utils.data.sampler import Sampler
 
-from model import Classifier, Autoencoder
+from model import Classifier
 
 # Matplotlib
 import matplotlib.pyplot as plt
@@ -32,8 +32,23 @@ def imshow(epoch, imgs, dec):
     # ax[0].set_yticks([])
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0, hspace=0)
     # plt.tight_layout()
-    plt.savefig(f'epoch{epoch}.png')
+    plt.savefig(f'./img/epoch{epoch}.png')
     # plt.show()
+
+
+class CompositeLoss():
+    def __init__(self, ce_weights):
+        self.ce_weights = ce_weights
+        self.bce_instance = nn.BCELoss()
+
+    def __call__(self, x, decoded, data, labels):
+        # Binary Cross Entropy Loss
+        bce_loss = self.bce_instance(decoded, data)
+        # Cross Entropy Loss
+        x = x.log()
+        ce_loss = F.nll_loss(x, labels, reduction='mean')
+
+        return ce_loss * self.ce_weights + bce_loss * (1.0 - self.ce_weights), ce_loss, bce_loss
 
 
 class ReductionSampler(Sampler):
@@ -73,51 +88,59 @@ def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def train(args, model, device, train_loader, data_count, optimizer, epoch, experiment, criterion=nn.BCELoss()):
+
+def train(args, model, device, train_loader, data_count, optimizer, epoch, experiment, criterion=None):
     model.train()
     iter_num = len(train_loader)
     print('lr: {0} epoch:[{1}]'.format(get_lr(optimizer), epoch))
     for batch_idx, (data, labels) in enumerate(train_loader):
         data, labels = data.to(device), labels.to(device)
         optimizer.zero_grad()
-        encoded, output = model(data)
-        # cal Loss
-        loss = criterion(output, data)
+        x, decoded = model(data)
+
+        loss, ce_loss, bce_loss = criterion(x, decoded, data, labels)
         loss.backward()
         optimizer.step()
 
-        pred = output.argmax(dim=1, keepdim=True)
         g_step = iter_num * (epoch - 1) + batch_idx
         experiment.log_metric("loss", loss.item(), step=g_step)
+        experiment.log_metric("ce_loss", ce_loss.item(), step=g_step)
+        experiment.log_metric("bce_loss", bce_loss.item(), step=g_step)
 
         if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            print('Train Epoch: {} [{}/{} ({:.0f}%)] Loss: {:.6f} CE_Loss: {:.6f} BCE_Loss: {:.6f}'.format(
                 epoch, batch_idx * len(data), data_count,
-                100. * batch_idx / len(train_loader), loss.item()))
+                100. * batch_idx / iter_num, loss.item(), ce_loss.item(), bce_loss.item()))
 
     experiment.log_metric("lr", get_lr(optimizer), step=epoch)
 
-def test(args, model, device, test_loader, data_count, epoch, experiment, pref='', criterion=nn.BCELoss()):
+
+def test(args, model, device, test_loader, data_count, epoch, experiment, pref='', criterion=None):
     model.eval()
     ref_data = None
     out_data = None
+    correct = 0
     with torch.no_grad():
         for data, labels in test_loader:
             data, labels = data.to(device), labels.to(device)
-            encoded, output = model(data)
+            x, decoded = model(data)
+
             # cal Loss
-            loss = criterion(output, data)
+            loss, ce_loss, bce_loss = criterion(x, decoded, data, labels)
 
-            # nomal
-            # test_loss += F.nll_loss(output.log(), labels, reduction='sum').item() # sum up batch loss
-
-            print('test_loss: {}'.format(loss.item()))
+            print('test_loss    : {}'.format(loss.item()))
+            print('test_ce_loss : {}'.format(ce_loss.item()))
+            print('test_bce_loss: {}'.format(bce_loss.item()))
         
             ref_data = data
-            out_data = output
+            out_data = decoded
 
-            # pred = output.argmax(dim=1, keepdim=True) # get the index of the max log-probability
-            # correct += pred.eq(labels.view_as(pred)).sum().item()
+            pred = x.argmax(dim=1, keepdim=True) # get the index of the max log-probability
+            correct += pred.eq(labels.view_as(pred)).sum().item()
+
+    # experiment.log_metric("loss", test_loss, step=(epoch-1))
+    experiment.log_metric("accuracy", correct / data_count, step=(epoch-1))
+    print('accuracy: {}'.format(correct / data_count))
 
     imshow(epoch, ref_data, out_data)
     # test_loss /= data_count
@@ -132,7 +155,7 @@ def main():
     parser = argparse.ArgumentParser(description='Cifar10 Convolutional Autoencoder Example')
     parser.add_argument('--batch-size', type=int, default=128, metavar='N', help='input batch size for training (default: 128)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: 25)')
+    parser.add_argument('--epochs', type=int, default=20, metavar='N', help='number of epochs to train (default: 25)')
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate (default: 0.1)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M', help='SGD momentum (default: 0.9)')
     parser.add_argument('--model-path', type=str, default='', metavar='M', help='model param path')
@@ -197,9 +220,9 @@ def main():
     # test alldata loader
     test_alldata_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
-    model = Autoencoder().to(device)
+    model = Classifier().to(device)
     # train loss
-    criterion = nn.BCELoss()
+    criterion = CompositeLoss(0.95)
 
     # load param
     if len(args.model_path) > 0:
@@ -211,7 +234,7 @@ def main():
     # lr = 0.1 if epoch < 15
     # lr = 0.01 if 15 <= epoch < 20
     # lr = 0.001 if 20 <= epoch < 25
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5, 7], gamma=0.1)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[12, 18], gamma=0.1)
 
     for epoch in range(1, args.epochs + 1):
         with experiment.train():
