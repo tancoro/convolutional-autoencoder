@@ -115,13 +115,14 @@ def train(args, model, device, train_loader, data_count, optimizer, epoch, exper
     experiment.log_metric("lr", get_lr(optimizer), step=epoch)
 
 
-def test(args, model, device, test_loader, data_count, epoch, experiment, pref='', criterion=None):
+def test(args, model, device, test_loader, data_count, epoch, experiment, lr, pref='', criterion=None):
     model.eval()
     ref_data = None
     out_data = None
     correct = 0
+    iter_num = len(test_loader)
     with torch.no_grad():
-        for data, labels in test_loader:
+        for batch_idx, (data, labels) in enumerate(test_loader):
             data, labels = data.to(device), labels.to(device)
             x, decoded = model(data)
 
@@ -131,16 +132,23 @@ def test(args, model, device, test_loader, data_count, epoch, experiment, pref='
             print('test_loss    : {}'.format(loss.item()))
             print('test_ce_loss : {}'.format(ce_loss.item()))
             print('test_bce_loss: {}'.format(bce_loss.item()))
+            g_step = iter_num * (epoch - 1) + batch_idx
+            experiment.log_metric("loss", loss.item(), step=g_step)
+            experiment.log_metric("ce_loss", ce_loss.item(), step=g_step)
+            experiment.log_metric("bce_loss", bce_loss.item(), step=g_step)
         
             ref_data = data
             out_data = decoded
 
             pred = x.argmax(dim=1, keepdim=True) # get the index of the max log-probability
-            correct += pred.eq(labels.view_as(pred)).sum().item()
+            correct = pred.eq(labels.view_as(pred)).sum().item()
+            print('accuracy: {}'.format(correct / len(labels)))
+            experiment.log_metric("accuracy", correct / len(labels), step=g_step)
+            experiment.log_metric("lr", lr, step=g_step)
 
     # experiment.log_metric("loss", test_loss, step=(epoch-1))
-    experiment.log_metric("accuracy", correct / data_count, step=(epoch-1))
-    print('accuracy: {}'.format(correct / data_count))
+    # experiment.log_metric("accuracy", correct / data_count, step=(epoch-1))
+    # print('accuracy: {}'.format(correct / data_count))
 
     imshow(epoch, ref_data, out_data)
     # test_loss /= data_count
@@ -155,15 +163,15 @@ def main():
     parser = argparse.ArgumentParser(description='Cifar10 Convolutional Autoencoder Example')
     parser.add_argument('--batch-size', type=int, default=128, metavar='N', help='input batch size for training (default: 128)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=20, metavar='N', help='number of epochs to train (default: 25)')
-    parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate (default: 0.1)')
+    parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: 25)')
+    parser.add_argument('--lr', type=float, default=0.01, metavar='LR', help='learning rate (default: 0.1)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M', help='SGD momentum (default: 0.9)')
     parser.add_argument('--model-path', type=str, default='', metavar='M', help='model param path')
     parser.add_argument('--loss-type', type=str, default='CE', metavar='L', help='B or CE or F or ICF_CE or ICF_F or CB_CE or CB_F')
     parser.add_argument('--beta', type=float, default=0.999, metavar='B', help='Beta for ClassBalancedLoss')
     parser.add_argument('--gamma', type=float, default=2.0, metavar='G', help='Gamma for FocalLoss')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
-    parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
+    parser.add_argument('--seed', type=int, default=2, metavar='S', help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N', help='how many batches to wait before logging training status')
     parser.add_argument('--balanced-data', action='store_true', default=False, help='For sampling rate. Default is Imbalanced-data.')
     parser.add_argument('--save-model', action='store_true', default=False, help='For Saving the current Model')
@@ -177,6 +185,8 @@ def main():
     # 実験キー(実験を一意に特定するためのキー)の取得
     exp_key = experiment.get_key()
     print('KEY: ' + exp_key)
+    ce_weights = 1.0
+    print('ce_weights: {}'.format(ce_weights))
     # HyperParamの記録
     hyper_params = {
         'batch_size': args.batch_size,
@@ -188,7 +198,8 @@ def main():
         'beta' : args.beta,
         'gamma' : args.gamma,
         'torch_manual_seed': args.seed,
-        'balanced_data' : args.balanced_data
+        'balanced_data' : args.balanced_data,
+        'ce_weights': ce_weights
     }
     experiment.log_parameters(hyper_params)
 
@@ -222,7 +233,7 @@ def main():
 
     model = Classifier().to(device)
     # train loss
-    criterion = CompositeLoss(0.95)
+    criterion = CompositeLoss(ce_weights)
 
     # load param
     if len(args.model_path) > 0:
@@ -230,11 +241,11 @@ def main():
 
     # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5e-4)
     # optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=args.momentum, weight_decay=5e-4)
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
     # lr = 0.1 if epoch < 15
     # lr = 0.01 if 15 <= epoch < 20
     # lr = 0.001 if 20 <= epoch < 25
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[12, 18], gamma=0.1)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10,15], gamma=0.1)
 
     for epoch in range(1, args.epochs + 1):
         with experiment.train():
@@ -243,7 +254,7 @@ def main():
         with experiment.test():
         #    test(args, model, device, test_minority_loader, len(test_minority_sampler), epoch, experiment, pref='minority')
         #    test(args, model, device, test_majority_loader, len(test_majority_sampler), epoch, experiment, pref='majority')
-            test(args, model, device, test_alldata_loader, len(test_alldata_loader.dataset), epoch, experiment, pref='all', criterion=criterion)
+            test(args, model, device, test_alldata_loader, len(test_alldata_loader.dataset), epoch, experiment, get_lr(optimizer), pref='all', criterion=criterion)
         if (args.save_model) and (epoch % 2 == 0):
             print('saving model to ./model/conv_autoencoder_{0}_{1:04d}.pt'.format(exp_key, epoch))
             torch.save(model.state_dict(), "./model/conv_autoencoder_{0}_{1:04d}.pt".format(exp_key, epoch))

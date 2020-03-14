@@ -8,26 +8,26 @@ class Autoencoder(nn.Module):
 
         # encoder
         self.conv1 = nn.Sequential(nn.ZeroPad2d((1,0,1,0)),
-                              nn.Conv2d(3, 32, kernel_size=5, stride=2),
-                              nn.BatchNorm2d(32),
+                              nn.Conv2d(3, 16, kernel_size=5, stride=2),
+                              nn.BatchNorm2d(16),
                               nn.ReLU())
         self.conv2 = nn.Sequential(nn.ZeroPad2d((1,1,1,1)),
-                              nn.Conv2d(32, 64, kernel_size=5, stride=2),
-                              nn.BatchNorm2d(64),
+                              nn.Conv2d(16, 32, kernel_size=5, stride=2),
+                              nn.BatchNorm2d(32),
                               nn.ReLU())
-        self.conv3 = nn.Sequential(nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=0),
-                              nn.BatchNorm2d(128),
+        self.conv3 = nn.Sequential(nn.Conv2d(32, 32, kernel_size=3, stride=2, padding=0),
+                              nn.BatchNorm2d(32),
                               nn.ReLU())
 
         # decoder
         self.conv3d = nn.Sequential(
-                              nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=0),
-                              nn.BatchNorm2d(64), nn.ReLU())
-        self.conv2d = nn.Sequential(
-                              nn.ConvTranspose2d(64, 32, kernel_size=5, stride=2),
+                              nn.ConvTranspose2d(32, 32, kernel_size=3, stride=2, padding=0),
                               nn.BatchNorm2d(32), nn.ReLU())
+        self.conv2d = nn.Sequential(
+                              nn.ConvTranspose2d(32, 16, kernel_size=5, stride=2),
+                              nn.BatchNorm2d(16), nn.ReLU())
         self.conv1d = nn.Sequential(
-                              nn.ConvTranspose2d(32, 3, kernel_size=5, stride=2),
+                              nn.ConvTranspose2d(16, 3, kernel_size=5, stride=2),
                               nn.BatchNorm2d(3))
 
     def encode(self, x):
@@ -60,7 +60,7 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.autoencoder = Autoencoder()
-        self.fc1 = nn.Conv2d(128, 10, kernel_size=3)
+        self.fc1 = nn.Conv2d(32, 10, kernel_size=3)
 
     def forward(self, x):
         encoded = self.autoencoder.encode(x)
