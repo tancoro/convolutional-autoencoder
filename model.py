@@ -65,10 +65,13 @@ class Classifier(nn.Module):
         self.autoencoder = Autoencoder()
         self.fc1 = nn.Conv2d(128, 10, kernel_size=3)
 
+        self.dropout2 = nn.Dropout2d(0.25)
+
     def forward(self, x):
         encoded = self.autoencoder.encode(x)
+        cx = self.dropout2(encoded)
         # print(f'encoded: {encoded.size()}')
-        cx = self.fc1(encoded)
+        cx = self.fc1(cx)
         # print(f'fc1: {cx.size()}')
         cx = cx.view(cx.size(0), -1)
         # print(f'view: {cx.size()}')
