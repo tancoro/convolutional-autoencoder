@@ -64,17 +64,16 @@ class Classifier(nn.Module):
 
     def forward(self, x):
         encoded = self.autoencoder.encode(x)
-        print(f'encoded: {encoded.size()}')
+        # print(f'encoded: {encoded.size()}')
         cx = self.fc1(encoded)
-        print(f'fc1: {cx.size()}')
+        # print(f'fc1: {cx.size()}')
         cx = cx.view(cx.size(0), -1)
-        print(f'view: {cx.size()}')
+        # print(f'view: {cx.size()}')
         cx = F.softmax(cx, dim=1)
         cx = cx.clamp(min=1e-8)
-        print(f'softmax: {cx}')
+        # print(f'softmax: {cx.size()}')
 
-        # decoded = self.decode(encoded)
-        decoded = None
+        decoded = self.autoencoder.decode(encoded)
 
         return cx, decoded
 

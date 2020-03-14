@@ -1,5 +1,5 @@
 # import comet_ml in the top of your file
-# from comet_ml import Experiment
+from comet_ml import Experiment
 
 import numpy as np
 
@@ -89,13 +89,13 @@ def get_lr(optimizer):
         return param_group['lr']
 
 
-def train(args, model, device, train_loader, data_count, optimizer, epoch, experiment, criterion=None)):
+def train(args, model, device, train_loader, data_count, optimizer, epoch, experiment, criterion=None):
     model.train()
     iter_num = len(train_loader)
     print('lr: {0} epoch:[{1}]'.format(get_lr(optimizer), epoch))
     for batch_idx, (data, labels) in enumerate(train_loader):
         data, labels = data.to(device), labels.to(device)
-        xoptimizer.zero_grad()
+        optimizer.zero_grad()
         x, decoded = model(data)
 
         loss, ce_loss, bce_loss = criterion(x, decoded, data, labels)
