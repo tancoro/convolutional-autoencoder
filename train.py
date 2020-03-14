@@ -9,33 +9,32 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torchvision import datasets, transforms, utils
+from torchvision import datasets, transforms
 from torch.utils.data.sampler import Sampler
 from tqdm import tqdm
 
 from model import Classifier
 
-# Matplotlib
 import matplotlib.pyplot as plt
 
-## (for Mac) OMP: Error #15: Initializing libiomp5.dylib, but found libiomp5.dylib already initialized.
-# import os
-# os.environ['KMP_DUPLICATE_LIB_OK']='True'
+# (for Mac) OMP: Error #15:
+# Initializing libiomp5.dylib, but found libiomp5.dylib already initialized.
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 
 def imshow(epoch, imgs, dec):
-    fig, ax = plt.subplots(nrows=2, ncols=12, sharex=True, sharey=True, figsize=(18,6))
-    # ax = ax.flatten()
+    fig, ax = plt.subplots(
+        nrows=2, ncols=12, sharex=True, sharey=True, figsize=(18, 6))
     for k in range(0, 12):
         newimg = imgs[k].cpu().numpy().transpose((1, 2, 0))
         decimg = dec[k].cpu().numpy().transpose((1, 2, 0))
         ax[0, k].imshow(newimg, interpolation='none')
         ax[1, k].imshow(decimg, interpolation='none')
-    # ax[0].set_xticks([])
-    # ax[0].set_yticks([])
-    plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0, hspace=0)
-    # plt.tight_layout()
+
+    plt.subplots_adjust(
+        left=None, bottom=None, right=None, top=None, wspace=0, hspace=0)
     plt.savefig(f'./img/epoch{epoch}.png')
-    # plt.show()
 
 
 class CompositeLoss():
@@ -59,7 +58,7 @@ class ReductionSampler(Sampler):
 
         label_hash = {}
         for idx, (img, label) in enumerate(self.data_source):
-            if not label in label_hash:
+            if label not in label_hash:
                 label_hash[label] = []
             label_hash[label].append(idx)
 
@@ -69,7 +68,9 @@ class ReductionSampler(Sampler):
             if k in sampling_rate:
                 label_size = len(label_hash[k])
                 sampling_count = int(label_size * sampling_rate[k])
-                rand_idx = torch.randint(high=label_size - 1, size=(sampling_count,), dtype=torch.int64).numpy()
+                rand_idx = torch.randint(
+                    high=label_size - 1, size=(sampling_count,),
+                    dtype=torch.int64).numpy()
                 self.indices.extend(np.array(label_hash[k])[rand_idx].tolist())
                 self.data_count_map[k] = len(rand_idx)
             else:
@@ -105,11 +106,12 @@ def get_lr(optimizer):
         return param_group['lr']
 
 
-def train(args, model, device, train_loader, data_count, optimizer, epoch, experiment, criterion=None):
+def train(args, model, device, train_loader,
+          data_count, optimizer, epoch,
+          experiment, criterion=None):
     model.train()
     iter_num = len(train_loader)
     lr = get_lr(optimizer)
-    # print('lr: {0} epoch:[{1}]'.format(get_lr(optimizer), epoch))
 
     loss_m = AverageMeter('{:.6f}')
     ce_loss_m = AverageMeter('{:.6f}')
@@ -137,16 +139,13 @@ def train(args, model, device, train_loader, data_count, optimizer, epoch, exper
             be_loss_m.update(bce_loss.item() * sample_num, sample_num)
 
             _tqdm.set_description('[train] Epoch {:02d}'.format(epoch))
-            _tqdm.set_postfix(OrderedDict(loss=loss_m.avg(), ce_loss=ce_loss_m.avg(), bce_loss=be_loss_m.avg(), lr=lr))
-
-            # if batch_idx % 10 == 0:
-            #    print('Train Epoch: {} [{}/{} ({:.0f}%)] Loss: {:.6f} CE_Loss: {:.6f} BCE_Loss: {:.6f}'.format(
-            #        epoch, batch_idx * len(data), data_count,
-            #        100. * batch_idx / iter_num, loss.item(), ce_loss.item(), bce_loss.item()))
+            _tqdm.set_postfix(OrderedDict(loss=loss_m.avg(),
+                ce_loss=ce_loss_m.avg(), bce_loss=be_loss_m.avg(), lr=lr))
 
 
-
-def test(args, model, device, test_loader, data_count, epoch, experiment, lr, pref='', criterion=None):
+def test(args, model, device, test_loader,
+         data_count, epoch, experiment,
+         lr, pref='', criterion=None):
     model.eval()
     ref_data = None
     out_data = None
@@ -171,34 +170,30 @@ def test(args, model, device, test_loader, data_count, epoch, experiment, lr, pr
                 experiment.log_metric("loss", loss.item(), step=g_step)
                 experiment.log_metric("ce_loss", ce_loss.item(), step=g_step)
                 experiment.log_metric("bce_loss", bce_loss.item(), step=g_step)
-        
+
                 ref_data = data
                 out_data = decoded
 
-                pred = x.argmax(dim=1, keepdim=True) # get the index of the max log-probability
+                # get the index of the max log-probability
+                pred = x.argmax(dim=1, keepdim=True)
                 correct = pred.eq(labels.view_as(pred)).sum().item()
+
                 sample_num = x.size(0)
-                experiment.log_metric("accuracy", correct / sample_num, step=g_step)
+                experiment.log_metric("accuracy",
+                    correct / sample_num, step=g_step)
                 experiment.log_metric("lr", lr, step=g_step)
-            
+
                 loss_m.update(loss.item() * sample_num, sample_num)
                 ce_loss_m.update(ce_loss.item() * sample_num, sample_num)
                 be_loss_m.update(bce_loss.item() * sample_num, sample_num)
                 correct_m.update(correct, sample_num)
 
                 _tqdm.set_description('[valid] Epoch {:02d}'.format(epoch))
-                _tqdm.set_postfix(OrderedDict(loss=loss_m.avg(), ce_loss=ce_loss_m.avg(), bce_loss=be_loss_m.avg(), lr=lr, acc=correct_m.avg()))
-                            
-    # experiment.log_metric("loss", test_loss, step=(epoch-1))
-    # experiment.log_metric("accuracy", correct / data_count, step=(epoch-1))
-    # print('accuracy: {}'.format(correct / data_count))
+                _tqdm.set_postfix(OrderedDict(loss=loss_m.avg(),
+                    ce_loss=ce_loss_m.avg(), bce_loss=be_loss_m.avg(), lr=lr, acc=correct_m.avg()))
 
+    # save decoded images
     imshow(epoch, ref_data, out_data)
-    # test_loss /= data_count
-    # experiment.log_metric(pref + "_loss", test_loss, step=(epoch-1))
-    # experiment.log_metric(pref + "_accuracy", correct / data_count, step=(epoch-1))
-    # print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-    #    test_loss, correct, data_count, 100. * correct / data_count))
 
 
 def main():
@@ -214,24 +209,23 @@ def main():
     parser.add_argument('--save_model', action='store_true', default=False, help='For Saving the current Model')
     args = parser.parse_args()
 
-    # Add the following code anywhere in your machine learning file
+    # comet.ml
     experiment = Experiment(api_key="5Yl3Rxz9S3E0PUKQTBpA0QJPi", project_name="convolutional-autoencoder", workspace="tancoro")
 
-    # ブラウザの実験ページを開く
     # experiment.display(clear=True, wait=True, new=0, autoraise=True)
-    # 実験キー(実験を一意に特定するためのキー)の取得
     exp_key = experiment.get_key()
     print('KEY: ' + exp_key)
     print('ce_weights: {}'.format(args.ce_weights))
     print('imbalance: {}'.format(args.imbalance))
-    # HyperParamの記録
+
+    # HyperParam
     hyper_params = {
         'epoch': args.epochs,
         'ce_weights': args.ce_weights,
         'learning_rate': args.lr,
-        'model_path' : args.model_path,
-        'imbalance' : args.imbalance,
-        'seed' : args.seed
+        'model_path': args.model_path,
+        'imbalance': args.imbalance,
+        'seed': args.seed
     }
     experiment.log_parameters(hyper_params)
 
@@ -252,14 +246,14 @@ def main():
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor()
         ]))
-    # train loader
 
-    # normal
+    # normal sampling
     if args.imbalance == 'N':
-        train_sampler = ReductionSampler(train_dataset, sampling_rate={2:0.5, 4:0.5, 9:0.5})
+        train_sampler = ReductionSampler(train_dataset, sampling_rate={2: 0.5, 4: 0.5, 9: 0.5})
     # under sampling
     elif args.imbalance == 'US':
-        train_sampler = ReductionSampler(train_dataset, sampling_rate={0:0.5, 1:0.5, 2:0.5, 3:0.5, 4:0.5, 5:0.5, 6:0.5, 7:0.5, 8:0.5, 9:0.5})
+        train_sampler = ReductionSampler(train_dataset, sampling_rate={0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5, 5: 0.5, 6: 0.5, 7: 0.5, 8: 0.5, 9: 0.5})
+
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, sampler=train_sampler, **kwargs)
 
     # test dataset
@@ -277,9 +271,9 @@ def main():
 
     # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    # lr = 0.1 if epoch < 15
-    # lr = 0.01 if 15 <= epoch < 20
-    # lr = 0.001 if 20 <= epoch < 25
+
+    # lr = 0.01 if epoch <= 15
+    # lr = 0.001 if 15 < epoch <= 20
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[15], gamma=0.1)
 
     for epoch in range(1, args.epochs + 1):
@@ -292,6 +286,7 @@ def main():
             print('saving model to ./model/conv_autoencoder_{0}_{1:04d}.pt'.format(exp_key, epoch))
             torch.save(model.state_dict(), "./model/conv_autoencoder_{0}_{1:04d}.pt".format(exp_key, epoch))
         scheduler.step()
+
 
 if __name__ == '__main__':
     main()
