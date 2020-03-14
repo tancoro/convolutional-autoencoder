@@ -13,9 +13,28 @@ from torch.utils.data.sampler import Sampler
 
 from model import Autoencoder
 
+# Matplotlib
+import matplotlib.pyplot as plt
+
 ## (for Mac) OMP: Error #15: Initializing libiomp5.dylib, but found libiomp5.dylib already initialized.
 # import os
 # os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
+def imshow(epoch, imgs, dec):
+    fig, ax = plt.subplots(nrows=2, ncols=12, sharex=True, sharey=True, figsize=(18,6))
+    # ax = ax.flatten()
+    for k in range(0, 12):
+        newimg = imgs[k].cpu().numpy().transpose((1, 2, 0))
+        decimg = dec[k].cpu().numpy().transpose((1, 2, 0))
+        ax[0, k].imshow(newimg, interpolation='none')
+        ax[1, k].imshow(decimg, interpolation='none')
+    # ax[0].set_xticks([])
+    # ax[0].set_yticks([])
+    plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0, hspace=0)
+    # plt.tight_layout()
+    plt.savefig(f'epoch{epoch}.png')
+    # plt.show()
+
 
 class ReductionSampler(Sampler):
     def __init__(self, data_source, sampling_rate={}):
@@ -57,6 +76,7 @@ def get_lr(optimizer):
 def train(args, model, device, train_loader, data_count, optimizer, epoch, experiment, criterion=nn.BCELoss()):
     model.train()
     iter_num = len(train_loader)
+    print('lr: {0} epoch:[{1}]'.format(get_lr(optimizer), epoch))
     for batch_idx, (data, labels) in enumerate(train_loader):
         data, labels = data.to(device), labels.to(device)
         optimizer.zero_grad()
@@ -77,34 +97,34 @@ def train(args, model, device, train_loader, data_count, optimizer, epoch, exper
 
     experiment.log_metric("lr", get_lr(optimizer), step=epoch)
 
-def test(args, model, device, test_loader, data_count, epoch, experiment, pref='', lossfunc=BasicCrossEntropyLoss()):
+def test(args, model, device, test_loader, data_count, epoch, experiment, pref='', criterion=nn.BCELoss()):
     model.eval()
-    test_loss = 0
-    correct = 0
+    ref_data = None
+    out_data = None
     with torch.no_grad():
         for data, labels in test_loader:
             data, labels = data.to(device), labels.to(device)
-
-            # forward (softmaxまで)
-            output = model(data)
+            encoded, output = model(data)
+            # cal Loss
+            loss = criterion(output, data)
 
             # nomal
             # test_loss += F.nll_loss(output.log(), labels, reduction='sum').item() # sum up batch loss
 
-            # cal Loss
-            test_loss += (lossfunc(output, labels) * len(labels)).item()
-            print('test_loss: {}'.format(test_loss))
+            print('test_loss: {}'.format(loss.item()))
+        
+            ref_data = data
+            out_data = output
 
-            pred = output.argmax(dim=1, keepdim=True) # get the index of the max log-probability
-            correct += pred.eq(labels.view_as(pred)).sum().item()
+            # pred = output.argmax(dim=1, keepdim=True) # get the index of the max log-probability
+            # correct += pred.eq(labels.view_as(pred)).sum().item()
 
-    test_loss /= data_count
-
-    experiment.log_metric(pref + "_loss", test_loss, step=(epoch-1))
-    experiment.log_metric(pref + "_accuracy", correct / data_count, step=(epoch-1))
-
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, data_count, 100. * correct / data_count))
+    imshow(epoch, ref_data, out_data)
+    # test_loss /= data_count
+    # experiment.log_metric(pref + "_loss", test_loss, step=(epoch-1))
+    # experiment.log_metric(pref + "_accuracy", correct / data_count, step=(epoch-1))
+    # print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+    #    test_loss, correct, data_count, 100. * correct / data_count))
 
 
 def main():
@@ -112,8 +132,8 @@ def main():
     parser = argparse.ArgumentParser(description='Cifar10 Convolutional Autoencoder Example')
     parser.add_argument('--batch-size', type=int, default=128, metavar='N', help='input batch size for training (default: 128)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=25, metavar='N', help='number of epochs to train (default: 25)')
-    parser.add_argument('--lr', type=float, default=0.1, metavar='LR', help='learning rate (default: 0.1)')
+    parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: 25)')
+    parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate (default: 0.1)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M', help='SGD momentum (default: 0.9)')
     parser.add_argument('--model-path', type=str, default='', metavar='M', help='model param path')
     parser.add_argument('--loss-type', type=str, default='CE', metavar='L', help='B or CE or F or ICF_CE or ICF_F or CB_CE or CB_F')
@@ -163,47 +183,48 @@ def main():
     # train dataset
     train_dataset = datasets.CIFAR10('./data', train=True, download=True, transform=transforms.Compose([transforms.ToTensor()]))
     # train loader
-    train_sampler = ReductionSampler(train_dataset, sampling_rate={1:0.5, 4:0.5, 6:0.5})
+    train_sampler = ReductionSampler(train_dataset) #, sampling_rate={1:0.5, 4:0.5, 6:0.5})
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler, **kwargs)
 
     # test dataset
     test_dataset = datasets.CIFAR10('./data', train=False, transform=transforms.Compose([transforms.ToTensor()]))
     # test majority loader
-    test_majority_sampler = ReductionSampler(test_dataset, sampling_rate={1:0, 4:0, 6:0})
-    test_majority_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_batch_size, sampler=test_majority_sampler, **kwargs)
+    # test_majority_sampler = ReductionSampler(test_dataset, sampling_rate={1:0, 4:0, 6:0})
+    # test_majority_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_batch_size, sampler=test_majority_sampler, **kwargs)
     # test minority loader
-    test_minority_sampler = ReductionSampler(test_dataset, sampling_rate={0:0, 2:0, 3:0, 5:0, 7:0, 8:0, 9:0})
-    test_minority_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_batch_size, sampler=test_minority_sampler, **kwargs)
+    # test_minority_sampler = ReductionSampler(test_dataset, sampling_rate={0:0, 2:0, 3:0, 5:0, 7:0, 8:0, 9:0})
+    # test_minority_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_batch_size, sampler=test_minority_sampler, **kwargs)
     # test alldata loader
     test_alldata_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
     model = Autoencoder().to(device)
     # train loss
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(autoencoder.parameters())
 
     # load param
     if len(args.model_path) > 0:
         model.load_state_dict(torch.load(args.model_path))
 
     # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5e-4)
+    # optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=args.momentum, weight_decay=5e-4)
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
     # lr = 0.1 if epoch < 15
     # lr = 0.01 if 15 <= epoch < 20
     # lr = 0.001 if 20 <= epoch < 25
-    # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[15,20], gamma=0.1)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5, 7], gamma=0.1)
 
     for epoch in range(1, args.epochs + 1):
         with experiment.train():
             experiment.log_current_epoch(epoch)
             train(args, model, device, train_loader, len(train_sampler), optimizer, epoch, experiment, criterion=criterion)
-        # with experiment.test():
+        with experiment.test():
         #    test(args, model, device, test_minority_loader, len(test_minority_sampler), epoch, experiment, pref='minority')
         #    test(args, model, device, test_majority_loader, len(test_majority_sampler), epoch, experiment, pref='majority')
-        #    test(args, model, device, test_alldata_loader, len(test_alldata_loader.dataset), epoch, experiment, pref='all')
-        if (args.save_model) and (epoch % 10 == 0):
-            print('saving model to ./model/cifar10_{0}_{1:04d}.pt'.format(exp_key, epoch))
-            torch.save(model.state_dict(), "./model/cifar10_{0}_{1:04d}.pt".format(exp_key, epoch))
-        # scheduler.step()
+            test(args, model, device, test_alldata_loader, len(test_alldata_loader.dataset), epoch, experiment, pref='all', criterion=criterion)
+        if (args.save_model) and (epoch % 2 == 0):
+            print('saving model to ./model/conv_autoencoder_{0}_{1:04d}.pt'.format(exp_key, epoch))
+            torch.save(model.state_dict(), "./model/conv_autoencoder_{0}_{1:04d}.pt".format(exp_key, epoch))
+        scheduler.step()
 
 if __name__ == '__main__':
     main()
