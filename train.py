@@ -1,6 +1,7 @@
 # import comet_ml in the top of your file
 from comet_ml import Experiment
 
+
 from collections import OrderedDict
 import numpy as np
 
